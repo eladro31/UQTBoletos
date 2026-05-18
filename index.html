@@ -12,7 +12,7 @@
         body { margin: 0; font-family: 'Segoe UI', sans-serif; background: var(--fondo); color: var(--texto); overflow-x: hidden; }
         
         input, select, textarea { width: 100%; padding: 14px; margin: 10px 0; border-radius: 8px; background: #111; color: var(--verde); border: 1px solid #333; box-sizing: border-box; outline: none; }
-        .btn-uqt { background: var(--verde); color: #000; border: none; padding: 16px; width: 100%; font-weight: bold; cursor: pointer; text-transform: uppercase; border-radius: 8px; transition: 0.3s; }
+        .btn-uqt { background: var(--verde); color: #000; border: none; padding: 16px; width: 100%; font-weight: bold; cursor: pointer; text-transform: uppercase; border-radius: 8px; transition: 0.3s; text-align: center; text-decoration: none; display: block; box-sizing: border-box; }
         .btn-uqt:active { transform: scale(0.98); }
 
         .planes-container { padding: 0 20px 40px 20px; }
@@ -71,6 +71,12 @@
             <button onclick="cerrarSesion()" style="background:var(--rojo); color:white; border:none; padding:5px 10px; border-radius:5px; font-size:0.7rem; font-weight:bold;">SALIR</button>
         </div>
 
+        <div style="padding: 20px 20px 0 20px;">
+            <a href="https://eladro31.github.io/UQT-S.A/" target="_blank" class="btn-uqt" style="background: var(--azul); color: #fff;">
+                📅 ¿Necesitas consultar horarios? Haz clic aquí
+            </a>
+        </div>
+
         <div class="sec-divider">🎫 Terminal de Compra Automática</div>
         <div style="padding: 0 20px;">
             <div class="item-card" style="cursor:default; background:#000; border: 2px solid var(--verde);">
@@ -80,11 +86,27 @@
                 <div id="módulo-compra-inputs" style="display:none; margin-top:15px;">
                     <label>Desde (Estación de Origen):</label>
                     <select id="compra-desde"></select>
+
                     <label>Hasta (Destino Solicitado):</label>
-                    <input type="text" id="compra-hasta" readonly style="background:#222; color:#fff">
+                    <select id="compra-hasta"></select>
+
                     <p style="font-size:1.1rem;">Precio Base Tramo: <b id="compra-precio" style="color:var(--verde)">R$ 0.00</b></p>
                     <button class="btn-uqt" onclick="confirmarCompraBoleto()">EMITIR BOLETO ELECTRÓNICO</button>
                 </div>
+            </div>
+        </div>
+
+        <div class="sec-divider">🎟️ Solicitar Boleto Físico &gt;</div>
+        <div style="padding: 0 20px;">
+            <div class="item-card" style="cursor:default; background: #050505; border: 1px dashed var(--oro);">
+                <p style="margin-top: 0; color: var(--oro); font-weight: bold;">Tu ID Institucional: <span id="fisico-display-id" style="color:#fff; font-family: monospace;">---</span></p>
+                
+                <label style="font-size: 0.85rem; color: #ccc;">Selecciona tu turno para retirar en boletería:</label>
+                <input type="datetime-local" id="fisico-turno">
+                
+                <button class="btn-uqt" style="background: var(--oro); color: #000; margin-top: 10px;" onclick="enviarSolicitudFisica()">
+                    📥 Enviar Solicitud a Admin
+                </button>
             </div>
         </div>
 
@@ -143,28 +165,63 @@
                 }
             });
 
-            auth.onAuthStateChanged(user => { if(user) { document.getElementById('auth-screen').style.display='none'; document.getElementById('app-6').style.display='block'; } });
+            auth.onAuthStateChanged(user => { 
+                if(user) { 
+                    document.getElementById('auth-screen').style.display='none'; 
+                    document.getElementById('app-6').style.display='block'; 
+                    // Setear ID en el módulo físico acortando el correo institucional
+                    document.getElementById('fisico-display-id').innerText = user.email.split('@')[0].toUpperCase();
+                } 
+            });
         }
 
+        // REPARACIÓN COMPLETA REQUERIMIENTO 2: Poblar dinámicamente tanto origen como destino
         function cambiarServicioMódulo(ramalId) {
             if(!ramalId) { document.getElementById('módulo-compra-inputs').style.display = 'none'; return; }
             const s = globalServicios.find(x => x.ramal === ramalId);
             if(!s) return;
             servicioSeleccionado = s;
             document.getElementById('módulo-compra-inputs').style.display = 'block';
-            document.getElementById('compra-hasta').value = s.paradas[s.paradas.length - 1].nombre;
             document.getElementById('compra-precio').innerText = `R$ ${s.precioTramo || 0}`;
+            
+            // Cargar selector "Desde" (todas las estaciones excepto la última)
             document.getElementById('compra-desde').innerHTML = s.paradas.slice(0, -1).map(p => `<option value="${p.nombre}">${p.nombre}</option>`).join('');
+            // Cargar selector "Hasta" (todas las estaciones excepto la primera)
+            document.getElementById('compra-hasta').innerHTML = s.paradas.slice(1).map(p => `<option value="${p.nombre}">${p.nombre}</option>`).join('');
         }
 
         async function confirmarCompraBoleto() {
+            const desde = document.getElementById('compra-desde').value;
+            const hasta = document.getElementById('compra-hasta').value;
+
+            if (desde === hasta) return alert("Error: El origen y el destino no pueden ser la misma estación.");
+
             const ticket = "UQT-" + Math.random().toString(36).substr(2,6).toUpperCase();
             await db.collection('boletos_emitidos').add({
                 boletoID: ticket, usuarioEmail: auth.currentUser.email,
-                desde: document.getElementById('compra-desde').value, hasta: document.getElementById('compra-hasta').value,
+                desde: desde, hasta: hasta,
                 servicio: servicioSeleccionado.ramal, timestamp: firebase.firestore.FieldValue.serverTimestamp()
             });
             alert("Boleto emitido con éxito. ID Localizador: " + ticket);
+        }
+
+        // IMPLEMENTACIÓN REQUERIMIENTO 3: Envío de turno de boleto físico al panel administrador
+        async function enviarSolicitudFisica() {
+            const turno = document.getElementById('fisico-turno').value;
+            if(!turno) return alert("Por favor, selecciona una fecha y hora válidas para tu turno.");
+
+            const usuarioId = auth.currentUser.email.split('@')[0].toUpperCase();
+
+            await db.collection('solicitudes_fisicas').add({
+                usuarioID: usuarioId,
+                email: auth.currentUser.email,
+                turnoReservado: turno,
+                estado: "Pendiente",
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            alert(`¡Solicitud enviada! Conserva tu ID [${usuarioId}]. Preséntate en ventanilla en el horario pactado.`);
+            document.getElementById('fisico-turno').value = "";
         }
 
         function prepararCompra(nombre, id) {
